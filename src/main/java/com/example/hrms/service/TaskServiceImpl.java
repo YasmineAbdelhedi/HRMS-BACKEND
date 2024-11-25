@@ -8,7 +8,11 @@ import com.example.hrms.repository.TaskRepository;
 import com.example.hrms.repository.ProjectRepository;
 import com.example.hrms.repository.ProjectAssignmentRepository;
 import com.example.hrms.repository.UserRepository;
+import jakarta.mail.MessagingException;
+import jakarta.mail.internet.MimeMessage;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -26,13 +30,17 @@ public class TaskServiceImpl implements TaskService {
     private final ProjectRepository projectRepository;
     private final ProjectAssignmentRepository projectAssignmentRepository;
     private final UserRepository userRepository;
+    private final JavaMailSender mailSender;
+
 
     @Autowired
-    public TaskServiceImpl(TaskRepository taskRepository, ProjectAssignmentRepository projectAssignmentRepository, ProjectRepository projectRepository, UserRepository userRepository) {
+    public TaskServiceImpl(TaskRepository taskRepository, ProjectAssignmentRepository projectAssignmentRepository, ProjectRepository projectRepository, UserRepository userRepository,JavaMailSender mailSender) {
         this.taskRepository = taskRepository;
         this.projectRepository = projectRepository;
         this.projectAssignmentRepository = projectAssignmentRepository;
         this.userRepository = userRepository;
+        this.mailSender = mailSender;
+
     }
 
     @Override
@@ -133,9 +141,10 @@ public class TaskServiceImpl implements TaskService {
         User currentUser = (User) authentication.getPrincipal();
 
         // Permission check for creating and assigning tasks
-        if (!hasPermission(currentUser, "CREATE_ASSIGN_TASK")) {
+        if (!hasPermission(currentUser, "CREATE_AND_ASSIGN_TASK")) {
             throw new AccessDeniedException("You do not have permission to create and assign tasks.");
         }
+
         // Fetch the project
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new RuntimeException("Project not found"));
@@ -167,8 +176,40 @@ public class TaskServiceImpl implements TaskService {
         // Save the task
         Task savedTask = taskRepository.save(task);
 
+        // Send email to the employee
+        String subject = "New Task Assigned: " + name;
+        String body = "Hello " + employee.getFullName() + ",\n\n"
+                + "A new task has been assigned to you.\n\n"
+                + "Task Details:\n"
+                + "Name: " + name + "\n"
+                + "Description: " + description + "\n"
+                + "Due Date: " + dueDate + "\n\n"
+                + "Project Details:\n"
+                + "Project Name: " + project.getName() + "\n"
+                + "Project Description: " + project.getDescription() + "\n\n"
+                + "Project Manager: " + project.getProjectManager().getFullName() + "\n\n"
+                + "Please make sure to complete the task by the due date.\n\n"
+                + "Best Regards,\n"
+                + "Project Management Team";
+
+        sendEmailNotification(employee.getEmail(), subject, body);
+
         return mapToTaskDto(savedTask);
     }
+
+    private void sendEmailNotification(String to, String subject, String body) {
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true);
+            helper.setTo(to);
+            helper.setSubject(subject);
+            helper.setText(body, true);
+            mailSender.send(message);
+        } catch (MessagingException e) {
+            throw new RuntimeException("Failed to send email", e);
+        }
+    }
+
 
     private boolean hasPermission(User user, String permission) {
         return user.getAuthorities().stream()

@@ -7,6 +7,7 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 @Entity
 @Data
@@ -24,9 +25,9 @@ public class Project {
     @ManyToOne
     private User projectManager;
 
-    @OneToMany(mappedBy = "project")
+    @OneToMany(mappedBy = "project", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonManagedReference
-    private List<Task> tasks;
+    private List<Task> tasks = new ArrayList<>(); // Initialize with an empty list
 
 
     @OneToMany(mappedBy = "project")

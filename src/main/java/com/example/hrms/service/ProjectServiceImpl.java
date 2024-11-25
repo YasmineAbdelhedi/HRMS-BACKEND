@@ -10,11 +10,15 @@ import com.example.hrms.repository.ProjectAssignmentRepository;
 import com.example.hrms.repository.ProjectRepository;
 import com.example.hrms.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
+import jakarta.mail.MessagingException;
+import jakarta.mail.internet.MimeMessage;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -25,12 +29,15 @@ public class ProjectServiceImpl implements ProjectService {
     private final ProjectRepository projectRepository;
     private final UserRepository userRepository;
     private final ProjectAssignmentRepository projectAssignmentRepository;
+    private final JavaMailSender mailSender;
 
     @Autowired
-    public ProjectServiceImpl(ProjectRepository projectRepository, UserRepository userRepository, ProjectAssignmentRepository projectAssignmentRepository) {
+    public ProjectServiceImpl(ProjectRepository projectRepository, UserRepository userRepository,
+                              ProjectAssignmentRepository projectAssignmentRepository, JavaMailSender mailSender) {
         this.projectRepository = projectRepository;
         this.userRepository = userRepository;
         this.projectAssignmentRepository = projectAssignmentRepository;
+        this.mailSender = mailSender;
     }
 
     @Override
@@ -48,7 +55,18 @@ public class ProjectServiceImpl implements ProjectService {
         project.setBudget(createProjectDto.getBudget());
         project.setProjectManager(currentUser);
 
-        return mapToProjectDto(projectRepository.save(project));
+        Project savedProject = projectRepository.save(project);
+
+        // Send email notification to the project manager
+        sendEmailNotification(
+                currentUser.getEmail(),
+                "Project Created Successfully",
+                "Your project '" + savedProject.getName() + "' has been successfully created. Details:\n" +
+                        "Description: " + savedProject.getDescription() + "\n" +
+                        "Budget: $" + savedProject.getBudget()
+        );
+
+        return mapToProjectDto(savedProject);
     }
 
     @Override
@@ -83,18 +101,6 @@ public class ProjectServiceImpl implements ProjectService {
     }
 
     @Override
-    public Optional<Project> findById(Long id) {
-        return projectRepository.findById(id);
-    }
-
-    @Override
-    public List<ProjectDto> findAll() {
-        return projectRepository.findAll().stream()
-                .map(this::mapToProjectDto)
-                .collect(Collectors.toList());
-    }
-
-    @Override
     public void assignEmployeeToProject(Long projectId, Long userId, String role) {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         User currentUser = (User) authentication.getPrincipal();
@@ -115,8 +121,6 @@ public class ProjectServiceImpl implements ProjectService {
             throw new RuntimeException("This user is already assigned to the project.");
         }
 
-
-
         // Create and save the project assignment
         ProjectAssignment projectAssignment = new ProjectAssignment();
         projectAssignment.setProject(project);
@@ -124,6 +128,14 @@ public class ProjectServiceImpl implements ProjectService {
         projectAssignment.setRole(role);
 
         projectAssignmentRepository.save(projectAssignment);
+
+        // Send email notification to the assigned employee
+        sendEmailNotification(
+                user.getEmail(),
+                "Assigned to Project: " + project.getName(),
+                "Dear " + user.getFullName() + ",\n\nYou have been assigned to the project '" + project.getName() +
+                        "'.\nRole: " + role + "\nDescription: " + project.getDescription() + "\n\nRegards,\nHRMS Team"
+        );
     }
 
     @Override
@@ -131,40 +143,56 @@ public class ProjectServiceImpl implements ProjectService {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         User currentUser = (User) authentication.getPrincipal();
 
-        // Permission check
         if (!hasPermission(currentUser, "ASSIGN_EMPLOYEES_TO_PROJECT")) {
             throw new AccessDeniedException("You do not have permission to assign employees to projects.");
         }
 
-        // Check if project exists
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new RuntimeException("Project not found"));
 
         for (ProjectAssignmentDto assignment : assignments) {
             User user = userRepository.findById(assignment.getUserId())
-                    .orElseThrow(() -> new RuntimeException("User with ID " + assignment.getUserId() + " not found"));
+                    .orElseThrow(() -> new RuntimeException("User not found"));
 
-            // Ensure user is not already assigned
             boolean isAlreadyAssigned = projectAssignmentRepository.existsByProjectIdAndUserId(projectId, user.getId());
             if (isAlreadyAssigned) {
-                throw new RuntimeException("User with ID " + user.getId() + " is already assigned to the project.");
+                throw new RuntimeException("User is already assigned to the project.");
             }
 
-
-            // Create and save the assignment
             ProjectAssignment projectAssignment = new ProjectAssignment();
             projectAssignment.setProject(project);
             projectAssignment.setUser(user);
             projectAssignment.setRole(assignment.getRole());
 
             projectAssignmentRepository.save(projectAssignment);
+
+            // Send email notification to each assigned employee
+            sendEmailNotification(
+                    user.getEmail(),
+                    "Assigned to Project: " + project.getName(),
+                    "Dear " + user.getFullName() + ",\n\nYou have been assigned to the project '" + project.getName() +
+                            "'.\nRole: " + assignment.getRole() + "\nDescription: " + project.getDescription() +
+                            "\n\nRegards,\nHRMS Team"
+            );
         }
     }
-
 
     private boolean hasPermission(User user, String permission) {
         return user.getAuthorities().stream()
                 .anyMatch(authority -> authority.getAuthority().equals(permission));
+    }
+
+    private void sendEmailNotification(String to, String subject, String body) {
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true);
+            helper.setTo(to);
+            helper.setSubject(subject);
+            helper.setText(body, true);
+            mailSender.send(message);
+        } catch (MessagingException e) {
+            throw new RuntimeException("Failed to send email", e);
+        }
     }
 
     // Mapper methods
@@ -200,18 +228,26 @@ public class ProjectServiceImpl implements ProjectService {
     }
 
     @Override
+    public List<ProjectDto> findAll() {
+        return projectRepository.findAll().stream()
+                .map(this::mapToProjectDto)
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public Optional<Project> findById(Long id) {
+        return projectRepository.findById(id);
+    }
+
+    @Override
     public List<ProjectDto> getProjectsByProjectManager(Long projectManagerId) {
-        // Find all projects managed by the project manager
         List<Project> projects = projectRepository.findByProjectManagerId(projectManagerId);
         return projects.stream().map(this::mapToProjectDto).collect(Collectors.toList());
     }
 
     @Override
     public List<ProjectDto> getProjectsByEmployee(Long employeeId) {
-        // Find all project assignments for the employee
         List<ProjectAssignment> assignments = projectAssignmentRepository.findByUserId(employeeId);
-
-        // Extract projects from the assignments
         List<Project> projects = assignments.stream()
                 .map(ProjectAssignment::getProject)
                 .distinct()
