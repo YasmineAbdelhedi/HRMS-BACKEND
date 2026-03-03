@@ -2,6 +2,7 @@ package com.example.hrms.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -30,12 +31,16 @@ public class SecurityConfiguration {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
+                .cors(cors -> {}) // active CORS et utilise ton bean CorsConfigurationSource
+
                 // Completely remove csrf() as it's no longer required for JWT-based stateless authentication
                 .csrf(AbstractHttpConfigurer::disable)
 
                 // Define authorization rules
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/auth/**").permitAll()  // Allow unauthenticated access for auth endpoints
+                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll() // <-- autorise OPTIONS
+
+                        .requestMatchers( "/auth/**").permitAll() // login et autres endpoints publics
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()  // Allow Swagger UI and API docs access
                         .requestMatchers("/admin/**").hasRole("ADMIN")  // Only accessible by ADMIN role
                         .requestMatchers("/hrmanager/**").hasRole("HR_MANAGER")  // Only accessible by HRMANAGER role
@@ -64,9 +69,10 @@ public class SecurityConfiguration {
     CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
 
-        configuration.setAllowedOrigins(List.of("http://localhost:8005"));
-        configuration.setAllowedMethods(List.of("GET","POST"));
+        configuration.setAllowedOrigins(List.of("http://localhost:4200"));
+        configuration.setAllowedMethods(List.of("GET","POST","PUT","DELETE","OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization","Content-Type"));
+
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
 
