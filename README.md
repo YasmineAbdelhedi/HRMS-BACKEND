@@ -3,10 +3,6 @@
 A Human Resource Management System backend built with Spring Boot.  
 This API covers authentication, employee/user management, attendance, leave requests, payroll, project management, project assignments, and task tracking.
 
-## Portfolio Summary
-
-Built a secure and modular HRMS backend using **Java 17**, **Spring Boot**, **Spring Security (JWT)**, and **MySQL**.  
-Implemented role/permission-based authorization and REST APIs for core HR operations (attendance, leave, payroll, profiles, projects, and tasks), including email notifications for project and task assignments.
 
 ## Core Features
 
